@@ -1,1 +1,89 @@
-version: "3.9"
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg17
+
+    container_name: dsc_postgres
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    ports:
+      - "${POSTGRES_PORT}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - dsc_network
+
+  redis:
+    image: redis:8-alpine
+
+    container_name: dsc_redis
+
+    restart: unless-stopped
+
+    ports:
+      - "${REDIS_PORT}:6379"
+
+    volumes:
+      - redis_data:/data
+
+    networks:
+      - dsc_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: dsc_backend
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+
+    ports:
+      - "${BACKEND_PORT}:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+    volumes:
+      - ./backend/app:/app/app
+
+    networks:
+      - dsc_network
+
+volumes:
+
+  postgres_data:
+
+  redis_data:
+
+networks:
+
+  dsc_network:
+    driver: bridge
