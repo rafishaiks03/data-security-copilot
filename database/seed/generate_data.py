@@ -11,10 +11,19 @@ This script generates realistic synthetic data for:
 - Transactions
 
 A controlled percentage of transactions and login events are
-generated as suspicious/fraudulent so that the future ML
-pipeline has labeled data to learn from.
+generated as suspicious/fraudulent so that the ML pipeline
+has labeled data to learn from.
 
-The data is written directly to PostgreSQL.
+The generator is designed to be SAFE TO RUN MULTIPLE TIMES.
+
+Important behavior:
+
+- Existing database data is preserved.
+- New customer emails are guaranteed to be unique.
+- Account numbers continue from the current maximum.
+- UUID-based records remain unique.
+- Each execution adds a new batch of data.
+- A failed generation is rolled back by PostgreSQL.
 """
 
 from __future__ import annotations
@@ -234,7 +243,9 @@ def random_date(
         int(delta.total_seconds()),
     )
 
-    return start + timedelta(seconds=random_seconds)
+    return start + timedelta(
+        seconds=random_seconds,
+    )
 
 
 def random_amount(
@@ -296,6 +307,68 @@ def choose_currency(
 
 
 # ============================================================
+# Customer Helpers
+# ============================================================
+
+
+def load_existing_customer_emails(
+    cursor,
+) -> set[str]:
+    """
+    Load existing customer emails.
+
+    We use this set to guarantee that a newly generated
+    customer never collides with an existing customer.
+    """
+
+    cursor.execute("""
+        SELECT email
+        FROM customers
+        """)
+
+    rows = cursor.fetchall()
+
+    return {row["email"].lower() for row in rows if row["email"]}
+
+
+def generate_unique_email(
+    existing_emails: set[str],
+) -> str:
+    """
+    Generate an email address that does not already exist.
+
+    Faker remains deterministic for the rest of the generated
+    dataset, but uniqueness is checked against PostgreSQL.
+    """
+
+    while True:
+
+        first_name = fake.first_name()
+
+        last_name = fake.last_name()
+
+        random_suffix = random.randint(
+            1000,
+            999999999,
+        )
+
+        email = (
+            f"{first_name.lower()}."
+            f"{last_name.lower()}."
+            f"{random_suffix}"
+            "@example.com"
+        )
+
+        normalized_email = email.lower()
+
+        if normalized_email not in existing_emails:
+
+            existing_emails.add(normalized_email)
+
+            return email
+
+
+# ============================================================
 # Customer Generation
 # ============================================================
 
@@ -306,9 +379,13 @@ def generate_customers(
 ) -> list[CustomerRecord]:
     """
     Generate customers and insert them into PostgreSQL.
+
+    Existing customers are preserved.
     """
 
     customers: list[CustomerRecord] = []
+
+    existing_emails = load_existing_customer_emails(cursor)
 
     for _ in range(customer_count):
 
@@ -320,12 +397,7 @@ def generate_customers(
 
         last_name = fake.last_name()
 
-        email = (
-            f"{first_name.lower()}."
-            f"{last_name.lower()}."
-            f"{random.randint(1000, 999999)}"
-            "@example.com"
-        )
+        email = generate_unique_email(existing_emails)
 
         date_of_birth = fake.date_of_birth(
             minimum_age=18,
@@ -551,6 +623,8 @@ def generate_devices(
 
     devices: list[DeviceRecord] = []
 
+    now = datetime.now(timezone.utc)
+
     for customer in customers:
 
         device_count = random.randint(
@@ -568,18 +642,18 @@ def generate_devices(
 
             ip_address = generate_ip_address()
 
-            fingerprint = f"device-{uuid.uuid4().hex}"
+            fingerprint = f"device-" f"{uuid.uuid4().hex}"
 
             is_trusted = device_index == 0
 
             first_seen = random_date(
-                datetime.now(timezone.utc) - timedelta(days=365),
-                datetime.now(timezone.utc) - timedelta(days=30),
+                now - timedelta(days=365),
+                now - timedelta(days=30),
             )
 
             last_seen = random_date(
                 first_seen,
-                datetime.now(timezone.utc),
+                now,
             )
 
             cursor.execute(
@@ -806,6 +880,7 @@ def generate_transactions(
     """
 
     if len(accounts) < 2:
+
         raise RuntimeError(
             "At least two accounts are required " "to generate transactions."
         )
@@ -968,14 +1043,26 @@ def generate_data(
     customer_count: int,
     fraud_rate: float,
     seed: int,
+    transactions_per_customer: int,
 ) -> None:
     """
     Execute the complete synthetic data generation pipeline.
+
+    The transaction volume is explicitly configurable.
+
+    Example:
+
+        1000 customers
+        20 transactions/customer
+
+        => approximately 20,000 transactions
     """
 
     random.seed(seed)
 
     Faker.seed(seed)
+
+    fake.seed_instance(seed)
 
     print()
 
@@ -993,6 +1080,8 @@ def generate_data(
 
     print(f"Fraud rate          : " f"{fraud_rate:.2%}")
 
+    print(f"Transactions/customer: " f"{transactions_per_customer}")
+
     print(f"Random seed         : " f"{seed}")
 
     print()
@@ -1000,6 +1089,8 @@ def generate_data(
     start_date = datetime.now(timezone.utc) - timedelta(days=90)
 
     end_date = datetime.now(timezone.utc)
+
+    transaction_count = customer_count * transactions_per_customer
 
     try:
 
@@ -1047,12 +1138,9 @@ def generate_data(
 
                 print(f"  Created " f"{login_count} login events")
 
-                transaction_count = max(
-                    customer_count * 20,
-                    100,
-                )
-
                 print("Generating transactions...")
+
+                print(f"  Target transaction count: " f"{transaction_count}")
 
                 transactions = generate_transactions(
                     cursor,
@@ -1109,8 +1197,8 @@ def parse_arguments() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Generate synthetic banking and "
-            "security data for "
+            "Generate synthetic banking "
+            "and security data for "
             "Data & Security Copilot."
         )
     )
@@ -1119,21 +1207,30 @@ def parse_arguments() -> argparse.Namespace:
         "--customers",
         type=int,
         default=DEFAULT_CUSTOMERS,
-        help=("Number of synthetic customers " "to generate."),
+        help=("Number of NEW synthetic " "customers to generate."),
     )
 
     parser.add_argument(
         "--fraud-rate",
         type=float,
         default=DEFAULT_FRAUD_RATE,
-        help=("Fraction of generated activity " "that should be suspicious."),
+        help=(
+            "Fraction of generated " "transactions and suspicious " "login activity."
+        ),
+    )
+
+    parser.add_argument(
+        "--transactions-per-customer",
+        type=int,
+        default=20,
+        help=("Number of transactions to " "generate per NEW customer."),
     )
 
     parser.add_argument(
         "--seed",
         type=int,
         default=DEFAULT_SEED,
-        help=("Random seed for reproducible " "datasets."),
+        help=("Random seed used for " "reproducible synthetic data."),
     )
 
     return parser.parse_args()
@@ -1154,10 +1251,15 @@ def main() -> None:
 
         raise ValueError("--fraud-rate must be between 0 and 1.")
 
+    if args.transactions_per_customer <= 0:
+
+        raise ValueError("--transactions-per-customer " "must be greater than zero.")
+
     generate_data(
         customer_count=args.customers,
         fraud_rate=args.fraud_rate,
         seed=args.seed,
+        transactions_per_customer=(args.transactions_per_customer),
     )
 
 
