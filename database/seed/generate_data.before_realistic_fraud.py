@@ -2,12 +2,28 @@
 Data & Security Copilot
 Synthetic Banking + Security Data Generator
 
-Generates synthetic customers, accounts, devices, login events,
-and transactions for development and ML experimentation.
+This script generates realistic synthetic data for:
 
-Fraud is generated probabilistically. Fraudulent transactions
-overlap with normal transactions so that the ML model must learn
-patterns rather than a single obvious rule.
+- Customers
+- Accounts
+- Devices
+- Login events
+- Transactions
+
+A controlled percentage of transactions and login events are
+generated as suspicious/fraudulent so that the ML pipeline
+has labeled data to learn from.
+
+The generator is designed to be SAFE TO RUN MULTIPLE TIMES.
+
+Important behavior:
+
+- Existing database data is preserved.
+- New customer emails are guaranteed to be unique.
+- Account numbers continue from the current maximum.
+- UUID-based records remain unique.
+- Each execution adds a new batch of data.
+- A failed generation is rolled back by PostgreSQL.
 """
 
 from __future__ import annotations
@@ -26,7 +42,7 @@ from faker import Faker
 from psycopg.rows import dict_row
 
 # ============================================================
-# Project configuration
+# Load Environment Variables
 # ============================================================
 
 PROJECT_ROOT = os.path.abspath(
@@ -46,14 +62,12 @@ load_dotenv(ENV_FILE)
 
 
 # ============================================================
-# Defaults
+# Configuration
 # ============================================================
 
 DEFAULT_CUSTOMERS = 100
 DEFAULT_FRAUD_RATE = 0.05
 DEFAULT_SEED = 42
-DEFAULT_TRANSACTIONS_PER_CUSTOMER = 20
-
 
 DATABASE_HOST = os.getenv(
     "POSTGRES_HOST",
@@ -83,15 +97,10 @@ DATABASE_PASSWORD = os.getenv(
 
 
 # ============================================================
-# Faker
+# Fake Data Configuration
 # ============================================================
 
 fake = Faker()
-
-
-# ============================================================
-# Reference data
-# ============================================================
 
 SUPPORTED_COUNTRIES = [
     ("US", "United States"),
@@ -104,7 +113,6 @@ SUPPORTED_COUNTRIES = [
     ("SG", "Singapore"),
 ]
 
-
 COUNTRY_CURRENCIES = {
     "US": "USD",
     "GB": "GBP",
@@ -116,12 +124,10 @@ COUNTRY_CURRENCIES = {
     "SG": "SGD",
 }
 
-
 ACCOUNT_TYPES = [
     "CHECKING",
     "SAVINGS",
 ]
-
 
 DEVICE_TYPES = [
     "MOBILE",
@@ -129,7 +135,6 @@ DEVICE_TYPES = [
     "DESKTOP",
     "LAPTOP",
 ]
-
 
 OPERATING_SYSTEMS = {
     "MOBILE": [
@@ -152,7 +157,6 @@ OPERATING_SYSTEMS = {
     ],
 }
 
-
 LOGIN_FAILURE_REASONS = [
     "INVALID_PASSWORD",
     "INVALID_OTP",
@@ -162,7 +166,7 @@ LOGIN_FAILURE_REASONS = [
 
 
 # ============================================================
-# Data classes
+# Data Classes
 # ============================================================
 
 
@@ -190,13 +194,16 @@ class DeviceRecord:
 
 
 # ============================================================
-# Database connection
+# Database Connection
 # ============================================================
 
 
 def get_database_connection() -> psycopg.Connection:
     """
-    Create a PostgreSQL connection.
+    Create a connection to PostgreSQL.
+
+    PostgreSQL is running inside Docker while this Python
+    script is running on the Mac host.
     """
 
     if not DATABASE_PASSWORD:
@@ -217,7 +224,7 @@ def get_database_connection() -> psycopg.Connection:
 
 
 # ============================================================
-# General helpers
+# Utility Functions
 # ============================================================
 
 
@@ -226,7 +233,7 @@ def random_date(
     end: datetime,
 ) -> datetime:
     """
-    Return a random UTC datetime between two dates.
+    Return a random UTC datetime between start and end.
     """
 
     delta = end - start
@@ -246,7 +253,7 @@ def random_amount(
     maximum: float = 5000,
 ) -> Decimal:
     """
-    Generate a random monetary amount.
+    Generate a realistic monetary amount.
     """
 
     amount = round(
@@ -262,7 +269,10 @@ def random_amount(
 
 def generate_ip_address() -> str:
     """
-    Generate a documentation-only IP address.
+    Generate a documentation/example IPv4 address.
+
+    We intentionally use TEST-NET ranges rather than real
+    public IP addresses.
     """
 
     networks = [
@@ -278,12 +288,12 @@ def generate_ip_address() -> str:
 
 def choose_country() -> str:
     """
-    Select a synthetic customer country.
+    Select a synthetic customer's home country.
     """
 
-    country_code, _ = random.choice(SUPPORTED_COUNTRIES)
+    country, _ = random.choice(SUPPORTED_COUNTRIES)
 
-    return country_code
+    return country
 
 
 def choose_currency(
@@ -297,7 +307,7 @@ def choose_currency(
 
 
 # ============================================================
-# Customers
+# Customer Helpers
 # ============================================================
 
 
@@ -305,8 +315,10 @@ def load_existing_customer_emails(
     cursor,
 ) -> set[str]:
     """
-    Load existing customer emails so repeated generator
-    executions do not create duplicate email addresses.
+    Load existing customer emails.
+
+    We use this set to guarantee that a newly generated
+    customer never collides with an existing customer.
     """
 
     cursor.execute("""
@@ -323,7 +335,10 @@ def generate_unique_email(
     existing_emails: set[str],
 ) -> str:
     """
-    Generate a unique synthetic email address.
+    Generate an email address that does not already exist.
+
+    Faker remains deterministic for the rest of the generated
+    dataset, but uniqueness is checked against PostgreSQL.
     """
 
     while True:
@@ -353,12 +368,19 @@ def generate_unique_email(
             return email
 
 
+# ============================================================
+# Customer Generation
+# ============================================================
+
+
 def generate_customers(
     cursor,
     customer_count: int,
 ) -> list[CustomerRecord]:
     """
-    Generate new customers.
+    Generate customers and insert them into PostgreSQL.
+
+    Existing customers are preserved.
     """
 
     customers: list[CustomerRecord] = []
@@ -454,7 +476,7 @@ def generate_customers(
 
 
 # ============================================================
-# Accounts
+# Account Generation
 # ============================================================
 
 
@@ -462,7 +484,18 @@ def get_next_account_number(
     cursor,
 ) -> int:
     """
-    Find the next available account number.
+    Ask PostgreSQL for the current highest account number.
+
+    Existing account numbers are preserved.
+
+    Example:
+
+        Existing:
+            100000000001
+            100000000002
+
+        Next generated account:
+            100000000003
     """
 
     cursor.execute("""
@@ -478,7 +511,9 @@ def get_next_account_number(
     if result is None:
         return 100000000001
 
-    return int(result["max_account_number"]) + 1
+    max_account_number = result["max_account_number"]
+
+    return int(max_account_number) + 1
 
 
 def generate_accounts(
@@ -487,6 +522,9 @@ def generate_accounts(
 ) -> list[AccountRecord]:
     """
     Generate one or two accounts for each customer.
+
+    Account numbers start after the current highest
+    account number in PostgreSQL.
     """
 
     accounts: list[AccountRecord] = []
@@ -571,7 +609,7 @@ def generate_accounts(
 
 
 # ============================================================
-# Devices
+# Device Generation
 # ============================================================
 
 
@@ -580,7 +618,7 @@ def generate_devices(
     customers: list[CustomerRecord],
 ) -> list[DeviceRecord]:
     """
-    Generate one to three devices per customer.
+    Generate one to three devices for each customer.
     """
 
     devices: list[DeviceRecord] = []
@@ -673,7 +711,7 @@ def generate_devices(
 
 
 # ============================================================
-# Login events
+# Login Event Generation
 # ============================================================
 
 
@@ -686,8 +724,7 @@ def generate_login_events(
     fraud_rate: float,
 ) -> int:
     """
-    Generate normal login activity plus a small amount of
-    suspicious login behavior.
+    Generate normal and suspicious login activity.
     """
 
     devices_by_customer: dict[
@@ -766,21 +803,21 @@ def generate_login_events(
         if random.random() < fraud_rate:
 
             failed_attempts = random.randint(
-                2,
-                6,
+                3,
+                8,
             )
 
             for _ in range(failed_attempts):
 
                 suspicious_ip = generate_ip_address()
 
-                other_countries = [
-                    country
-                    for country, _ in SUPPORTED_COUNTRIES
-                    if country != customer.country_code
-                ]
-
-                suspicious_country = random.choice(other_countries)
+                suspicious_country = random.choice(
+                    [
+                        country
+                        for country, _ in SUPPORTED_COUNTRIES
+                        if country != customer.country_code
+                    ]
+                )
 
                 login_timestamp = random_date(
                     start_date,
@@ -825,174 +862,7 @@ def generate_login_events(
 
 
 # ============================================================
-# Transaction behavior
-# ============================================================
-
-
-def choose_transaction_amount(
-    is_fraud: bool,
-) -> Decimal:
-    """
-    Generate a transaction amount.
-
-    Fraudulent transactions overlap with normal transactions.
-    Only a subset are unusually large.
-    """
-
-    if is_fraud:
-
-        fraud_pattern = random.random()
-
-        if fraud_pattern < 0.15:
-
-            return random_amount(
-                minimum=5000,
-                maximum=15000,
-            )
-
-        if fraud_pattern < 0.40:
-
-            return random_amount(
-                minimum=1500,
-                maximum=6000,
-            )
-
-        return random_amount(
-            minimum=20,
-            maximum=2500,
-        )
-
-    return random_amount(
-        minimum=5,
-        maximum=1500,
-    )
-
-
-def choose_transaction_time(
-    is_fraud: bool,
-    start_date: datetime,
-    end_date: datetime,
-) -> datetime:
-    """
-    Fraud has a higher probability of unusual hours,
-    but many fraudulent transactions still happen during
-    normal hours.
-    """
-
-    timestamp = random_date(
-        start_date,
-        end_date,
-    )
-
-    if is_fraud and random.random() < 0.35:
-
-        timestamp = timestamp.replace(
-            hour=random.choice(
-                [
-                    0,
-                    1,
-                    2,
-                    3,
-                    4,
-                    5,
-                    23,
-                ]
-            ),
-            minute=random.randint(
-                0,
-                59,
-            ),
-            second=random.randint(
-                0,
-                59,
-            ),
-        )
-
-    return timestamp
-
-
-def choose_transaction_country(
-    customer_country: str,
-    is_fraud: bool,
-) -> str:
-    """
-    Fraud has a higher probability of an unusual country.
-    """
-
-    if not is_fraud:
-
-        if random.random() < 0.96:
-            return customer_country
-
-    else:
-
-        if random.random() < 0.65:
-
-            other_countries = [
-                country
-                for country, _ in SUPPORTED_COUNTRIES
-                if country != customer_country
-            ]
-
-            return random.choice(other_countries)
-
-    return customer_country
-
-
-def choose_transaction_device(
-    customer_devices: list[DeviceRecord],
-    is_fraud: bool,
-) -> uuid.UUID | None:
-    """
-    Fraud has a higher probability of using an untrusted
-    device or no device.
-    """
-
-    if not customer_devices:
-        return None
-
-    if is_fraud:
-
-        fraud_device_pattern = random.random()
-
-        if fraud_device_pattern < 0.20:
-            return None
-
-        if fraud_device_pattern < 0.55:
-
-            untrusted_devices = [
-                device for device in customer_devices if not device.is_trusted
-            ]
-
-            if untrusted_devices:
-
-                return random.choice(untrusted_devices).device_id
-
-    return random.choice(customer_devices).device_id
-
-
-def choose_description() -> str:
-    """
-    Generate a normal-looking transaction description.
-
-    The fraud label is intentionally NOT encoded in the
-    description because that would cause target leakage.
-    """
-
-    descriptions = [
-        "ONLINE_TRANSFER",
-        "ACCOUNT_TRANSFER",
-        "BILL_PAYMENT",
-        "PERSONAL_TRANSFER",
-        "MERCHANT_PAYMENT",
-        "INTERNATIONAL_TRANSFER",
-    ]
-
-    return random.choice(descriptions)
-
-
-# ============================================================
-# Transactions
+# Transaction Generation
 # ============================================================
 
 
@@ -1004,14 +874,9 @@ def generate_transactions(
     fraud_rate: float,
     start_date: datetime,
     end_date: datetime,
-) -> tuple[int, int]:
+) -> int:
     """
-    Generate transactions and explicitly persist the ground-truth
-    fraud label.
-
-    Returns:
-
-        normal_count, fraud_count
+    Generate normal and suspicious transactions.
     """
 
     if len(accounts) < 2:
@@ -1032,8 +897,7 @@ def generate_transactions(
             [],
         ).append(device)
 
-    normal_count = 0
-    fraud_count = 0
+    transaction_count_inserted = 0
 
     for _ in range(transaction_count):
 
@@ -1053,46 +917,78 @@ def generate_transactions(
 
         receiver = random.choice(possible_receivers)
 
-        # ----------------------------------------------------
-        # Ground-truth fraud decision
-        # ----------------------------------------------------
-
         is_fraud = random.random() < fraud_rate
 
-        known_fraud_label = 1 if is_fraud else 0
+        if is_fraud:
 
-        # ----------------------------------------------------
-        # Transaction characteristics
-        # ----------------------------------------------------
+            amount = random_amount(
+                minimum=5000,
+                maximum=25000,
+            )
 
-        amount = choose_transaction_amount(is_fraud)
+            transaction_country = random.choice(
+                [
+                    country
+                    for country, _ in SUPPORTED_COUNTRIES
+                    if country != sender.country_code
+                ]
+            )
 
-        transaction_timestamp = choose_transaction_time(
-            is_fraud,
-            start_date,
-            end_date,
-        )
+            device_id = None
 
-        transaction_country = choose_transaction_country(
-            sender.country_code,
-            is_fraud,
-        )
+            transaction_hour = random.choice(
+                [
+                    1,
+                    2,
+                    3,
+                    4,
+                    23,
+                ]
+            )
 
-        customer_devices = devices_by_customer.get(
-            sender.customer_id,
-            [],
-        )
+            transaction_timestamp = random_date(
+                start_date,
+                end_date,
+            ).replace(
+                hour=transaction_hour,
+                minute=random.randint(
+                    0,
+                    59,
+                ),
+                second=random.randint(
+                    0,
+                    59,
+                ),
+            )
 
-        device_id = choose_transaction_device(
-            customer_devices,
-            is_fraud,
-        )
+            description = (
+                "SYNTHETIC_FRAUD " "large_amount " "unusual_country " "untrusted_device"
+            )
 
-        description = choose_description()
+        else:
 
-        # ----------------------------------------------------
-        # Persist transaction + ground truth
-        # ----------------------------------------------------
+            amount = random_amount(
+                minimum=5,
+                maximum=1500,
+            )
+
+            transaction_country = sender.country_code
+
+            customer_devices = devices_by_customer.get(
+                sender.customer_id,
+                [],
+            )
+
+            device_id = (
+                random.choice(customer_devices).device_id if customer_devices else None
+            )
+
+            transaction_timestamp = random_date(
+                start_date,
+                end_date,
+            )
+
+            description = "SYNTHETIC_NORMAL_TRANSACTION"
 
         cursor.execute(
             """
@@ -1106,8 +1002,7 @@ def generate_transactions(
                 device_id,
                 transaction_timestamp,
                 status,
-                description,
-                known_fraud_label
+                description
             )
             VALUES (
                 %s,
@@ -1119,7 +1014,6 @@ def generate_transactions(
                 %s,
                 %s,
                 'COMPLETED',
-                %s,
                 %s
             )
             """,
@@ -1132,26 +1026,16 @@ def generate_transactions(
                 device_id,
                 transaction_timestamp,
                 description,
-                known_fraud_label,
             ),
         )
 
-        if is_fraud:
+        transaction_count_inserted += 1
 
-            fraud_count += 1
-
-        else:
-
-            normal_count += 1
-
-    return (
-        normal_count,
-        fraud_count,
-    )
+    return transaction_count_inserted
 
 
 # ============================================================
-# Main generation pipeline
+# Main Generation Pipeline
 # ============================================================
 
 
@@ -1162,7 +1046,16 @@ def generate_data(
     transactions_per_customer: int,
 ) -> None:
     """
-    Generate one synthetic batch.
+    Execute the complete synthetic data generation pipeline.
+
+    The transaction volume is explicitly configurable.
+
+    Example:
+
+        1000 customers
+        20 transactions/customer
+
+        => approximately 20,000 transactions
     """
 
     random.seed(seed)
@@ -1183,13 +1076,13 @@ def generate_data(
 
     print()
 
-    print(f"Customers requested       : " f"{customer_count}")
+    print(f"Customers requested : " f"{customer_count}")
 
-    print(f"Fraud rate                : " f"{fraud_rate:.2%}")
+    print(f"Fraud rate          : " f"{fraud_rate:.2%}")
 
-    print(f"Transactions/customer     : " f"{transactions_per_customer}")
+    print(f"Transactions/customer: " f"{transactions_per_customer}")
 
-    print(f"Random seed               : " f"{seed}")
+    print(f"Random seed         : " f"{seed}")
 
     print()
 
@@ -1249,10 +1142,7 @@ def generate_data(
 
                 print(f"  Target transaction count: " f"{transaction_count}")
 
-                (
-                    normal_count,
-                    fraud_count,
-                ) = generate_transactions(
+                transactions = generate_transactions(
                     cursor,
                     accounts,
                     devices,
@@ -1262,15 +1152,7 @@ def generate_data(
                     end_date,
                 )
 
-                print(f"  Created " f"{normal_count + fraud_count} " f"transactions")
-
-                print()
-
-                print("Transaction labels generated:")
-
-                print(f"  Normal: " f"{normal_count}")
-
-                print(f"  Fraud : " f"{fraud_count}")
+                print(f"  Created " f"{transactions} transactions")
 
             connection.commit()
 
@@ -1304,7 +1186,7 @@ def generate_data(
 
 
 # ============================================================
-# CLI
+# Command Line Interface
 # ============================================================
 
 
@@ -1314,43 +1196,44 @@ def parse_arguments() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(
-        description=("Generate synthetic banking " "and security data.")
+        description=(
+            "Generate synthetic banking "
+            "and security data for "
+            "Data & Security Copilot."
+        )
     )
 
     parser.add_argument(
         "--customers",
         type=int,
         default=DEFAULT_CUSTOMERS,
-        help=("Number of NEW customers " "to generate."),
+        help=("Number of NEW synthetic " "customers to generate."),
     )
 
     parser.add_argument(
         "--fraud-rate",
         type=float,
         default=DEFAULT_FRAUD_RATE,
-        help=("Target probability that a generated " "transaction is fraudulent."),
+        help=(
+            "Fraction of generated " "transactions and suspicious " "login activity."
+        ),
     )
 
     parser.add_argument(
         "--transactions-per-customer",
         type=int,
-        default=DEFAULT_TRANSACTIONS_PER_CUSTOMER,
-        help=("Number of transactions generated " "per new customer."),
+        default=20,
+        help=("Number of transactions to " "generate per NEW customer."),
     )
 
     parser.add_argument(
         "--seed",
         type=int,
         default=DEFAULT_SEED,
-        help=("Random seed for reproducible " "synthetic generation."),
+        help=("Random seed used for " "reproducible synthetic data."),
     )
 
     return parser.parse_args()
-
-
-# ============================================================
-# Entry point
-# ============================================================
 
 
 def main() -> None:
