@@ -1,26 +1,49 @@
+"""
+Data & Security Copilot
+FastAPI application entry point.
+"""
+
 from fastapi import FastAPI
 
-from app.api.database import router as database_router
-from app.api.health import router as health_router
-from app.core.config import get_settings
+from backend.app.api.alerts import router as alerts_router
 
-settings = get_settings()
+# ============================================================
+# Application
+# ============================================================
 
 app = FastAPI(
-    title=settings.app_name,
-    description="AI-powered database and security platform",
+    title="Data & Security Copilot API",
+    description=(
+        "API for fraud detection, security alerts, " "and AI-assisted investigation."
+    ),
     version="0.1.0",
 )
 
 
-app.include_router(health_router)
-app.include_router(database_router)
+# ============================================================
+# Routers
+# ============================================================
+
+app.include_router(
+    alerts_router,
+)
 
 
-@app.get("/")
-def root() -> dict[str, str]:
+# ============================================================
+# Health check
+# ============================================================
+
+
+@app.get(
+    "/health",
+    tags=["System"],
+)
+def health_check():
+    """
+    Basic application health check.
+    """
+
     return {
-        "application": settings.app_name,
-        "version": "0.1.0",
-        "message": "Data & Security Copilot API is running.",
+        "status": "ok",
+        "service": "data-security-copilot-api",
     }
