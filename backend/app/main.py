@@ -6,6 +6,8 @@ FastAPI application entry point.
 from fastapi import FastAPI
 
 from backend.app.api.alerts import router as alerts_router
+from backend.app.api.auth import router as auth_router
+from backend.app.api.users import router as users_router
 
 # ============================================================
 # Application
@@ -28,6 +30,13 @@ app.include_router(
     alerts_router,
 )
 
+app.include_router(
+    auth_router,
+)
+
+app.include_router(
+    users_router,
+)
 
 # ============================================================
 # Health check

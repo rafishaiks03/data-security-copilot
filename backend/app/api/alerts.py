@@ -4,12 +4,15 @@ Fraud alert API endpoints.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query
+from backend.app.api.dependencies import require_roles
 
 from backend.app.db.database import get_database_connection
+from backend.app.schemas.alerts import (
+    AlertListResponse,
+    AlertResponse,
+    AlertUpdateRequest,
+)
 
 router = APIRouter(
     prefix="/api/v1/alerts",
@@ -18,31 +21,22 @@ router = APIRouter(
 
 
 # ============================================================
-# Request models
-# ============================================================
-
-
-class AlertStatusUpdate(BaseModel):
-    status: str = Field(
-        ...,
-        description="New alert status.",
-    )
-
-    reviewed_by: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="Analyst reviewing the alert.",
-    )
-
-
-# ============================================================
 # List alerts
 # ============================================================
 
 
-@router.get("")
+@router.get(
+    "",
+    response_model=AlertListResponse,
+)
 def list_alerts(
+    current_user: dict = Depends(
+        require_roles(
+            "ADMIN",
+            "INVESTIGATOR",
+            "VIEWER",
+        )
+    ),
     limit: int = Query(
         default=50,
         ge=1,
@@ -76,6 +70,7 @@ def list_alerts(
     """
 
     try:
+
         with get_database_connection() as connection:
 
             with connection.cursor() as cursor:
@@ -99,10 +94,10 @@ def list_alerts(
             for row in rows
         ]
 
-        return {
-            "count": len(alerts),
-            "alerts": alerts,
-        }
+        return AlertListResponse(
+            count=len(alerts),
+            alerts=alerts,
+        )
 
     except Exception as exc:
 
@@ -117,9 +112,19 @@ def list_alerts(
 # ============================================================
 
 
-@router.get("/{alert_id}")
+@router.get(
+    "/{alert_id}",
+    response_model=AlertResponse,
+)
 def get_alert(
     alert_id: str,
+    current_user: dict = Depends(
+        require_roles(
+            "ADMIN",
+            "INVESTIGATOR",
+            "VIEWER",
+        )
+    ),
 ):
     """
     Return a single fraud alert by alert_id.
@@ -160,6 +165,7 @@ def get_alert(
                 row = cursor.fetchone()
 
                 if row is None:
+
                     raise HTTPException(
                         status_code=404,
                         detail="Fraud alert not found.",
@@ -167,12 +173,14 @@ def get_alert(
 
                 columns = [description.name for description in cursor.description]
 
-        return dict(
+        alert = dict(
             zip(
                 columns,
                 row,
             )
         )
+
+        return AlertResponse(**alert)
 
     except HTTPException:
         raise
@@ -186,30 +194,47 @@ def get_alert(
 
 
 # ============================================================
-# Update alert status
+# Update alert
 # ============================================================
 
 
-@router.patch("/{alert_id}")
+@router.patch(
+    "/{alert_id}",
+    response_model=AlertResponse,
+)
 def update_alert(
     alert_id: str,
-    update: AlertStatusUpdate,
+    request: AlertUpdateRequest,
+    current_user: dict = Depends(
+        require_roles(
+            "ADMIN",
+            "INVESTIGATOR",
+        )
+    ),
 ):
     """
-    Update the status and reviewer information for a fraud alert.
+    Update the status of a fraud alert.
+
+    ADMIN and INVESTIGATOR users can update alerts.
+    VIEWER users cannot.
     """
 
     allowed_statuses = {
         "OPEN",
         "INVESTIGATING",
         "RESOLVED",
+        "FALSE_POSITIVE",
     }
 
-    if update.status not in allowed_statuses:
+    new_status = request.status.upper()
+
+    if new_status not in allowed_statuses:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Invalid status. Allowed values: " "OPEN, INVESTIGATING, RESOLVED."
+                "Invalid alert status. "
+                "Allowed values: OPEN, INVESTIGATING, "
+                "RESOLVED, FALSE_POSITIVE."
             ),
         )
 
@@ -218,7 +243,7 @@ def update_alert(
         SET
             status = %s,
             reviewed_by = %s,
-            reviewed_at = %s,
+            reviewed_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE alert_id = %s
         RETURNING
@@ -239,8 +264,6 @@ def update_alert(
             updated_at
     """
 
-    reviewed_at = datetime.now(timezone.utc)
-
     try:
 
         with get_database_connection() as connection:
@@ -250,9 +273,8 @@ def update_alert(
                 cursor.execute(
                     query,
                     (
-                        update.status,
-                        update.reviewed_by,
-                        reviewed_at,
+                        new_status,
+                        current_user.get("username"),
                         alert_id,
                     ),
                 )
@@ -260,9 +282,6 @@ def update_alert(
                 row = cursor.fetchone()
 
                 if row is None:
-
-                    connection.rollback()
-
                     raise HTTPException(
                         status_code=404,
                         detail="Fraud alert not found.",
@@ -272,12 +291,14 @@ def update_alert(
 
             connection.commit()
 
-        return dict(
+        alert = dict(
             zip(
                 columns,
                 row,
             )
         )
+
+        return AlertResponse(**alert)
 
     except HTTPException:
         raise
@@ -287,151 +308,4 @@ def update_alert(
         raise HTTPException(
             status_code=500,
             detail="Failed to update fraud alert.",
-        ) from exc
-
-
-# ============================================================
-# Alert investigation details
-# ============================================================
-
-
-@router.get("/{alert_id}/investigation")
-def get_alert_investigation(
-    alert_id: str,
-):
-    """
-    Return an investigation view for a fraud alert.
-
-    Includes:
-    - alert information
-    - transaction information
-    - sender account information
-    - sender customer information
-    """
-
-    query = """
-        SELECT
-            fa.alert_id,
-            fa.alert_type,
-            fa.risk_score,
-            fa.risk_level,
-            fa.model_name,
-            fa.model_version,
-            fa.reason,
-            fa.features,
-            fa.status AS alert_status,
-            fa.reviewed_by,
-            fa.reviewed_at,
-            fa.created_at AS alert_created_at,
-
-            t.transaction_id,
-            t.transaction_type_code,
-            t.amount,
-            t.currency_code,
-            t.transaction_timestamp,
-            t.country_code,
-            t.status AS transaction_status,
-            t.description,
-
-            a.account_id,
-            a.account_number,
-            a.account_type,
-            a.status AS account_status,
-
-            c.customer_id,
-            c.first_name,
-            c.last_name,
-            c.email,
-            c.phone,
-            c.country_code AS customer_country_code
-
-        FROM fraud_alerts fa
-
-        JOIN transactions t
-            ON t.transaction_id = fa.transaction_id
-
-        LEFT JOIN accounts a
-            ON a.account_id = t.sender_account_id
-
-        LEFT JOIN customers c
-            ON c.customer_id = a.customer_id
-
-        WHERE fa.alert_id = %s
-    """
-
-    try:
-
-        with get_database_connection() as connection:
-
-            with connection.cursor() as cursor:
-
-                cursor.execute(
-                    query,
-                    (alert_id,),
-                )
-
-                row = cursor.fetchone()
-
-                if row is None:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Fraud alert not found.",
-                    )
-
-                columns = [
-                    description.name
-                    for description in cursor.description
-                ]
-
-        data = dict(zip(columns, row))
-
-        return {
-            "alert": {
-                "alert_id": data["alert_id"],
-                "alert_type": data["alert_type"],
-                "risk_score": data["risk_score"],
-                "risk_level": data["risk_level"],
-                "model_name": data["model_name"],
-                "model_version": data["model_version"],
-                "reason": data["reason"],
-                "features": data["features"],
-                "status": data["alert_status"],
-                "reviewed_by": data["reviewed_by"],
-                "reviewed_at": data["reviewed_at"],
-                "created_at": data["alert_created_at"],
-            },
-            "transaction": {
-                "transaction_id": data["transaction_id"],
-                "transaction_type_code": data["transaction_type_code"],
-                "amount": data["amount"],
-                "currency_code": data["currency_code"],
-                "transaction_timestamp": data["transaction_timestamp"],
-                "country_code": data["country_code"],
-                "status": data["transaction_status"],
-                "description": data["description"],
-            },
-            "account": {
-                "account_id": data["account_id"],
-                "account_number": data["account_number"],
-                "account_type": data["account_type"],
-                "status": data["account_status"],
-            },
-            "customer": {
-                "customer_id": data["customer_id"],
-                "first_name": data["first_name"],
-                "last_name": data["last_name"],
-                "email": data["email"],
-                "phone": data["phone"],
-                "country_code": data["customer_country_code"],
-            },
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as exc:
-
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve investigation details.",
         ) from exc
