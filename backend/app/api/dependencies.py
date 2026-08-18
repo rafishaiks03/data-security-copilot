@@ -1,41 +1,37 @@
 """
-FastAPI authentication and authorization dependencies.
+FastAPI authentication and RBAC dependencies.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import Callable
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.app.core.security import decode_access_token
 
-# ============================================================
-# HTTP Bearer authentication
-# ============================================================
-
-bearer_scheme = HTTPBearer(
+security = HTTPBearer(
     auto_error=True,
 )
 
 
 # ============================================================
-# Get authenticated user
+# Current authenticated user
 # ============================================================
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> dict:
     """
-    Validate the JWT access token and return its claims.
+    Validate the JWT bearer token and return its claims.
     """
 
+    token = credentials.credentials
+
     try:
-        payload = decode_access_token(
-            credentials.credentials,
-        )
+        payload = decode_access_token(token)
 
     except ValueError as exc:
 
@@ -51,44 +47,30 @@ def get_current_user(
 
 
 # ============================================================
-# Role-based authorization
+# Role-based access control
 # ============================================================
 
 
-def require_roles(*allowed_roles: str) -> Callable:
-    """
-    Create a dependency that requires the authenticated user
-    to have one of the specified roles.
+def require_roles(
+    *allowed_roles: str,
+) -> Callable:
 
-    Example:
-
-        Depends(require_roles("ADMIN"))
-
-    or:
-
-        Depends(require_roles("ADMIN", "INVESTIGATOR"))
-    """
-
-    normalized_roles = {role.upper() for role in allowed_roles}
-
-    def role_checker(
+    def role_dependency(
         current_user: dict = Depends(get_current_user),
     ) -> dict:
 
-        role = current_user.get("role")
+        user_role = current_user.get("role")
 
-        if not role:
+        if user_role not in allowed_roles:
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="User role is missing from access token.",
-            )
-
-        if role.upper() not in normalized_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions.",
+                detail=(
+                    "Insufficient permissions. "
+                    f"Required role: {', '.join(allowed_roles)}."
+                ),
             )
 
         return current_user
 
-    return role_checker
+    return role_dependency

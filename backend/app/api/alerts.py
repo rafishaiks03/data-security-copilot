@@ -32,9 +32,9 @@ router = APIRouter(
 def list_alerts(
     current_user: dict = Depends(
         require_roles(
-            "ADMIN",
-            "INVESTIGATOR",
-            "VIEWER",
+            "SECURITY_ADMIN",
+            "SECURITY_ANALYST",
+            "AUDITOR",
         )
     ),
     limit: int = Query(
@@ -120,9 +120,9 @@ def get_alert(
     alert_id: str,
     current_user: dict = Depends(
         require_roles(
-            "ADMIN",
-            "INVESTIGATOR",
-            "VIEWER",
+            "SECURITY_ADMIN",
+            "SECURITY_ANALYST",
+            "AUDITOR",
         )
     ),
 ):
@@ -207,8 +207,8 @@ def update_alert(
     request: AlertUpdateRequest,
     current_user: dict = Depends(
         require_roles(
-            "ADMIN",
-            "INVESTIGATOR",
+            "SECURITY_ADMIN",
+            "SECURITY_ANALYST",
         )
     ),
 ):
