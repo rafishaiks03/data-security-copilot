@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from backend.app.api.alerts import router as alerts_router
 from backend.app.api.auth import router as auth_router
 from backend.app.api.users import router as users_router
+from backend.app.api.audit import router as audit_router
 
 # ============================================================
 # Application
@@ -36,6 +37,10 @@ app.include_router(
 
 app.include_router(
     users_router,
+)
+
+app.include_router(
+    audit_router,
 )
 
 # ============================================================

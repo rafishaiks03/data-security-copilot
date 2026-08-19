@@ -10,6 +10,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
     status,
 )
 
@@ -20,6 +21,7 @@ from backend.app.schemas.users import (
     UserResponse,
     UserUpdateRequest,
 )
+from backend.app.services.audit import create_audit_log
 from backend.app.services.users import (
     create_user as create_user_service,
     get_user_by_id,
@@ -44,7 +46,8 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
 )
 def create_application_user(
-    request: UserCreateRequest,
+    request: Request,
+    user_request: UserCreateRequest,
     current_user: dict = Depends(
         require_roles(
             "SECURITY_ADMIN",
@@ -60,18 +63,42 @@ def create_application_user(
     try:
 
         user = create_user_service(
-            username=request.username,
-            password=request.password,
-            role=request.role,
+            username=user_request.username,
+            password=user_request.password,
+            role=user_request.role,
+        )
+        print("CURRENT USER:", current_user)
+        print("CURRENT USER SUB:", current_user.get("sub"))
+        print("CREATED USER ID:", user["user_id"])
+        create_audit_log(
+            user_id=current_user.get("user_id"),
+            username=current_user.get("username"),
+            action="CREATE_USER",
+            resource_type="USER",
+            resource_id=str(user["user_id"]),
+            details={
+                "created_username": user["username"],
+                "created_role": user["role"],
+            },
+            ip_address=request.client.host if request.client else None,
         )
 
         return UserResponse(**user)
 
-    except Exception as exc:
+    except ValueError as exc:
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to create user.",
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+
+        print("CREATE USER ERROR:", repr(exc))
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
 
 
@@ -162,7 +189,8 @@ def get_application_user(
 )
 def update_application_user(
     user_id: UUID,
-    request: UserUpdateRequest,
+    user_request: UserUpdateRequest,
+    request: Request,
     current_user: dict = Depends(
         require_roles(
             "SECURITY_ADMIN",
@@ -175,18 +203,31 @@ def update_application_user(
     SECURITY_ADMIN only.
     """
 
-    if request.role is None and request.is_active is None:
+    if user_request.role is None and user_request.is_active is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=("At least one of 'role' or " "'is_active' must be provided."),
+        )
+
+    # Get the existing user first so that the audit event
+    # can record what changed.
+    existing_user = get_user_by_id(
+        str(user_id),
+    )
+
+    if existing_user is None:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
         )
 
     try:
 
         user = update_user(
             user_id=str(user_id),
-            role=request.role,
-            is_active=request.is_active,
+            role=user_request.role,
+            is_active=user_request.is_active,
         )
 
     except ValueError as exc:
@@ -209,5 +250,21 @@ def update_application_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found.",
         )
+
+    create_audit_log(
+        user_id=current_user.get("user_id"),
+        username=current_user.get("username"),
+        action="UPDATE_USER",
+        resource_type="USER",
+        resource_id=str(user_id),
+        details={
+            "target_username": user["username"],
+            "old_role": existing_user["role"],
+            "new_role": user["role"],
+            "old_is_active": existing_user["is_active"],
+            "new_is_active": user["is_active"],
+        },
+        ip_address=request.client.host if request.client else None,
+    )
 
     return UserResponse(**user)

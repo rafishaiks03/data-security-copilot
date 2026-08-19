@@ -25,12 +25,14 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> dict:
     """
-    Validate the JWT bearer token and return its claims.
+    Validate the JWT bearer token and return a normalized
+    authenticated-user object.
     """
 
     token = credentials.credentials
 
     try:
+
         payload = decode_access_token(token)
 
     except ValueError as exc:
@@ -43,7 +45,48 @@ def get_current_user(
             },
         ) from exc
 
-    return payload
+    # JWT subject contains the authenticated user's UUID.
+    user_id = payload.get("sub")
+
+    username = payload.get("username")
+    role = payload.get("role")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token does not contain a user ID.",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token does not contain a username.",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token does not contain a role.",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    current_user = {
+        "user_id": user_id,
+        "username": username,
+        "role": role,
+    }
+
+    print("CURRENT USER:", current_user)
+
+    return current_user
 
 
 # ============================================================

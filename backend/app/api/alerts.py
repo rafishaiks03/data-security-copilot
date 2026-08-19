@@ -13,6 +13,7 @@ from backend.app.schemas.alerts import (
     AlertResponse,
     AlertUpdateRequest,
 )
+from backend.app.services.audit import create_audit_log
 
 router = APIRouter(
     prefix="/api/v1/alerts",
@@ -298,6 +299,17 @@ def update_alert(
             )
         )
 
+        create_audit_log(
+            user_id=current_user.get("user_id"),
+            username=current_user.get("username"),
+            action="UPDATE_ALERT",
+            resource_type="FRAUD_ALERT",
+            resource_id=alert_id,
+            details={
+                "new_status": new_status,
+            },
+        )
+
         return AlertResponse(**alert)
 
     except HTTPException:
@@ -306,6 +318,5 @@ def update_alert(
     except Exception as exc:
 
         raise HTTPException(
-            status_code=500,
-            detail="Failed to update fraud alert.",
+            status_code=500, detail="Failed to update fraud alert."
         ) from exc
