@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
+from ipaddress import IPv4Address, IPv6Address
 
 
 class AuditLogResponse(BaseModel):
@@ -27,7 +28,7 @@ class AuditLogResponse(BaseModel):
     resource_type: str | None
     resource_id: UUID | None
     details: dict[str, Any] | None
-    ip_address: str | None
+    ip_address: IPv4Address | IPv6Address | None
     created_at: datetime
 
 

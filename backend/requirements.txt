@@ -4,3 +4,5 @@ sqlalchemy
 psycopg[binary]
 pydantic-settings
 redis
+python-jose[cryptography]
+passlib[bcrypt]

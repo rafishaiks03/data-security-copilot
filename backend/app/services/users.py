@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.app.core.security import hash_password
-from backend.app.db.database import get_database_connection
+from app.core.security import hash_password
+from app.db.database import get_database_connection
 
 ALLOWED_ROLES = {
     "SECURITY_ADMIN",

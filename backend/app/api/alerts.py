@@ -5,15 +5,15 @@ Fraud alert API endpoints.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from backend.app.api.dependencies import require_roles
+from app.api.dependencies import require_roles
 
-from backend.app.db.database import get_database_connection
-from backend.app.schemas.alerts import (
+from app.db.database import get_database_connection
+from app.schemas.alerts import (
     AlertListResponse,
     AlertResponse,
     AlertUpdateRequest,
 )
-from backend.app.services.audit import create_audit_log
+from app.services.audit import create_audit_log
 
 router = APIRouter(
     prefix="/api/v1/alerts",

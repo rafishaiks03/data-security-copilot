@@ -14,15 +14,15 @@ from fastapi import (
     status,
 )
 
-from backend.app.api.dependencies import require_roles
-from backend.app.schemas.users import (
+from app.api.dependencies import require_roles
+from app.schemas.users import (
     UserCreateRequest,
     UserListResponse,
     UserResponse,
     UserUpdateRequest,
 )
-from backend.app.services.audit import create_audit_log
-from backend.app.services.users import (
+from app.services.audit import create_audit_log
+from app.services.users import (
     create_user as create_user_service,
     get_user_by_id,
     list_users,
