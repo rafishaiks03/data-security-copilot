@@ -4,6 +4,9 @@ Security audit log API endpoints.
 
 from __future__ import annotations
 
+from datetime import datetime
+from uuid import UUID
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -12,9 +15,9 @@ from fastapi import (
     status,
 )
 
-from backend.app.api.dependencies import require_roles
-from backend.app.db.database import get_database_connection
-from backend.app.schemas.audit import (
+from app.api.dependencies import require_roles
+from app.db.database import get_database_connection
+from app.schemas.audit import (
     AuditLogListResponse,
     AuditLogResponse,
 )
@@ -45,14 +48,82 @@ def list_audit_logs(
         ge=1,
         le=500,
     ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+    ),
+    action: str | None = Query(
+        default=None,
+    ),
+    username: str | None = Query(
+        default=None,
+    ),
+    resource_type: str | None = Query(
+        default=None,
+    ),
+    resource_id: UUID | None = Query(
+        default=None,
+    ),
 ):
     """
-    Return recent security audit events.
+    Return security audit events.
 
     SECURITY_ADMIN only.
+
+    Supports filtering by:
+    - action
+    - username
+    - resource type
+    - resource ID
+
+    Supports pagination using:
+    - limit
+    - offset
     """
 
-    query = """
+    conditions: list[str] = []
+    parameters: list[object] = []
+
+    # --------------------------------------------------------
+    # Optional filters
+    # --------------------------------------------------------
+
+    if action is not None:
+        conditions.append("action = %s")
+        parameters.append(action.upper())
+
+    if username is not None:
+        conditions.append("username = %s")
+        parameters.append(username)
+
+    if resource_type is not None:
+        conditions.append("resource_type = %s")
+        parameters.append(resource_type.upper())
+
+    if resource_id is not None:
+        conditions.append("resource_id = %s")
+        parameters.append(str(resource_id))
+
+    where_clause = ""
+
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+    # --------------------------------------------------------
+    # Count query
+    # --------------------------------------------------------
+
+    count_query = f"""
+        SELECT COUNT(*)
+        FROM audit_logs
+        {where_clause}
+    """
+
+    # --------------------------------------------------------
+    # Data query
+    # --------------------------------------------------------
+
+    query = f"""
         SELECT
             audit_id,
             user_id,
@@ -64,9 +135,17 @@ def list_audit_logs(
             ip_address,
             created_at
         FROM audit_logs
+        {where_clause}
         ORDER BY created_at DESC
         LIMIT %s
+        OFFSET %s
     """
+
+    parameters_with_pagination = [
+        *parameters,
+        limit,
+        offset,
+    ]
 
     try:
 
@@ -74,9 +153,24 @@ def list_audit_logs(
 
             with connection.cursor() as cursor:
 
+                # --------------------------------------------
+                # Total matching records
+                # --------------------------------------------
+
+                cursor.execute(
+                    count_query,
+                    parameters,
+                )
+
+                total_count = cursor.fetchone()[0]
+
+                # --------------------------------------------
+                # Requested page
+                # --------------------------------------------
+
                 cursor.execute(
                     query,
-                    (limit,),
+                    parameters_with_pagination,
                 )
 
                 rows = cursor.fetchall()
@@ -94,11 +188,16 @@ def list_audit_logs(
         ]
 
         return AuditLogListResponse(
-            count=len(audit_logs),
+            count=total_count,
             audit_logs=[AuditLogResponse(**log) for log in audit_logs],
         )
 
     except Exception as exc:
+
+        print(
+            "AUDIT LOG RETRIEVAL ERROR:",
+            repr(exc),
+        )
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

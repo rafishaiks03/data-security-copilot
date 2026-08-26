@@ -8,7 +8,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from backend.app.db.database import get_database_connection
+from app.db.database import get_database_connection
 
 
 def create_audit_log(

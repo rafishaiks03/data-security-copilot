@@ -6,16 +6,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
-from backend.app.core.config import get_settings
-from backend.app.core.security import (
+from app.core.config import get_settings
+from app.core.security import (
     create_access_token,
     verify_password,
 )
-from backend.app.schemas.auth import (
+from app.schemas.auth import (
     LoginRequest,
     TokenResponse,
 )
-from backend.app.services.users import get_user_by_username
+from app.services.users import get_user_by_username
 
 router = APIRouter(
     prefix="/api/v1/auth",
