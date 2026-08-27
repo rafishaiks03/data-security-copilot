@@ -1,7 +1,20 @@
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 function getToken(): string | null {
-  return localStorage.getItem("access_token");
+  return (
+    localStorage.getItem("access_token") ??
+    sessionStorage.getItem("access_token")
+  );
+}
+
+function saveToken(token: string): void {
+  localStorage.setItem("access_token", token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem("access_token");
+  sessionStorage.removeItem("access_token");
 }
 
 async function apiFetch<T>(
@@ -12,7 +25,11 @@ async function apiFetch<T>(
 
   const headers = new Headers(options.headers);
 
-  headers.set("Content-Type", "application/json");
+  headers.set("Accept", "application/json");
+
+  if (options.body) {
+    headers.set("Content-Type", "application/json");
+  }
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -23,15 +40,62 @@ async function apiFetch<T>(
     headers,
   });
 
-  if (!response.ok) {
-    const text = await response.text();
+  if (response.status === 401) {
+  clearToken();
 
-    throw new Error(
-      `API request failed (${response.status}): ${text || response.statusText}`,
-    );
+  window.dispatchEvent(
+    new Event("auth:logout"),
+  );
+}
+
+  if (!response.ok) {
+    let message = `API request failed (${response.status})`;
+
+    try {
+      const body = await response.json();
+
+      if (body?.detail) {
+        message = body.detail;
+      }
+    } catch {
+      // Keep default message.
+    }
+
+    throw new Error(message);
   }
 
-  return response.json();
+  return response.json() as Promise<T>;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export async function login(
+  username: string,
+  password: string,
+): Promise<TokenResponse> {
+  const response = await apiFetch<TokenResponse>(
+    "/api/v1/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        username,
+        password,
+      }),
+    },
+  );
+
+  saveToken(response.access_token);
+
+  return response;
 }
 
 export interface Alert {
@@ -39,12 +103,12 @@ export interface Alert {
   transaction_id: string;
   customer_id: string;
   alert_type: string;
-  risk_score: string;
+  risk_score: string | number;
   risk_level: string;
   model_name: string;
   model_version: string;
   reason: string;
-  features: Record<string, number>;
+  features: Record<string, unknown>;
   status: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
@@ -76,12 +140,16 @@ export interface AuditLogListResponse {
 
 export function getAlerts(limit = 10) {
   return apiFetch<AlertListResponse>(
-    `/api/v1/alerts?limit=${limit}`,
+    `/api/v1/alerts?limit=${encodeURIComponent(limit)}`,
   );
 }
 
 export function getAuditLogs(limit = 50) {
   return apiFetch<AuditLogListResponse>(
-    `/api/v1/audit-logs?limit=${limit}`,
+    `/api/v1/audit-logs?limit=${encodeURIComponent(limit)}`,
   );
+}
+
+export function isAuthenticated(): boolean {
+  return Boolean(getToken());
 }

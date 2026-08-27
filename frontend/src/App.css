@@ -664,3 +664,47 @@ select {
   font-size: 10px;
   font-weight: 500;
 }
+
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-details {
+  min-width: 0;
+  flex: 1;
+}
+
+.logout-button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid #263c55;
+  border-radius: 7px;
+
+  background: #0a1828;
+  color: #71859c;
+
+  cursor: pointer;
+
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.logout-button:hover {
+  color: #f1aeb5;
+  background: #24151a;
+  border-color: #633238;
+}
+
+.logout-button:active {
+  transform: translateY(1px);
+}

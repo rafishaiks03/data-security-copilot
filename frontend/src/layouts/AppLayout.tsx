@@ -1,14 +1,17 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Activity,
   Bot,
   Database,
   FileSearch,
   LayoutDashboard,
+  LogOut,
   Shield,
   Terminal,
   Users,
 } from "lucide-react";
+
+import { clearToken } from "../api/client";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -21,6 +24,13 @@ const navigation = [
 ];
 
 export default function AppLayout() {
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    clearToken();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -28,6 +38,7 @@ export default function AppLayout() {
           <div className="brand-mark">
             <Activity size={20} />
           </div>
+
           <div>
             <div className="brand-name">Security Copilot</div>
             <div className="brand-subtitle">AI Security Platform</div>
@@ -89,10 +100,21 @@ export default function AppLayout() {
 
           <div className="user-card">
             <div className="avatar">A</div>
-            <div>
+
+            <div className="user-details">
               <div className="user-name">admin</div>
               <div className="user-role">SECURITY_ADMIN</div>
             </div>
+
+            <button
+              type="button"
+              className="logout-button"
+              onClick={handleLogout}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut size={17} />
+            </button>
           </div>
         </div>
       </aside>
@@ -101,6 +123,7 @@ export default function AppLayout() {
         <header className="topbar">
           <div>
             <div className="topbar-title">Data & Security Copilot</div>
+
             <div className="topbar-subtitle">
               AI-powered security operations
             </div>
@@ -111,6 +134,7 @@ export default function AppLayout() {
               <span className="status-dot" />
               LIVE
             </div>
+
             <div className="environment">LOCAL</div>
           </div>
         </header>
