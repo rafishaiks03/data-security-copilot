@@ -78,6 +78,31 @@ export interface TokenResponse {
   expires_in: number;
 }
 
+export interface User {
+  user_id: string;
+  username: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserListResponse {
+  count: number;
+  users: User[];
+}
+
+export interface UserCreateRequest {
+  username: string;
+  password: string;
+  role: string;
+}
+
+export interface UserUpdateRequest {
+  role?: string;
+  is_active?: boolean;
+}
+
 export async function login(
   username: string,
   password: string,
@@ -144,6 +169,14 @@ export function getAlerts(limit = 10) {
   );
 }
 
+export function getAlert(
+  alertId: string,
+): Promise<Alert> {
+  return apiFetch<Alert>(
+    `/api/v1/alerts/${encodeURIComponent(alertId)}`,
+  );
+}
+
 export function getAuditLogs(limit = 50) {
   return apiFetch<AuditLogListResponse>(
     `/api/v1/audit-logs?limit=${encodeURIComponent(limit)}`,
@@ -152,4 +185,23 @@ export function getAuditLogs(limit = 50) {
 
 export function isAuthenticated(): boolean {
   return Boolean(getToken());
+}
+
+export function getUsers() {
+  return apiFetch<UserListResponse>("/api/v1/users");
+}
+
+export function getUser(userId: string) {
+  return apiFetch<User>(
+    `/api/v1/users/${encodeURIComponent(userId)}`,
+  );
+}
+
+export function createUser(
+  request: UserCreateRequest,
+) {
+  return apiFetch<User>("/api/v1/users", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
 }
