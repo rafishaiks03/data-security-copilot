@@ -205,3 +205,16 @@ export function createUser(
     body: JSON.stringify(request),
   });
 }
+
+export function updateUser(
+  userId: string,
+  request: UserUpdateRequest,
+) {
+  return apiFetch<User>(
+    `/api/v1/users/${encodeURIComponent(userId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(request),
+    },
+  );
+}

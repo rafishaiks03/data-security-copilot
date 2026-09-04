@@ -9,6 +9,7 @@ from app.api.alerts import router as alerts_router
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.audit import router as audit_router
+from app.api.data import router as data_router
 from fastapi.middleware.cors import CORSMiddleware
 
 # ============================================================
@@ -52,6 +53,10 @@ app.include_router(
 
 app.include_router(
     audit_router,
+)
+
+app.include_router(
+    data_router,
 )
 
 # ============================================================
