@@ -103,6 +103,92 @@ export interface UserUpdateRequest {
   is_active?: boolean;
 }
 
+export interface DataTableListResponse {
+  count: number;
+  tables: string[];
+}
+
+export interface DataTableColumn {
+  name: string;
+  type: string;
+}
+
+export interface DataTableResponse {
+  table: string;
+  columns: DataTableColumn[];
+  count: number;
+  limit: number;
+  offset: number;
+  rows: Record<string, unknown>[];
+}
+
+export function getDataTables() {
+  return apiFetch<DataTableListResponse>(
+    "/api/v1/data/tables",
+  );
+}
+
+export interface DataTableQuery {
+  search?: string;
+  filterColumn?: string;
+  filterValue?: string;
+  filterMode?: "contains" | "equals";
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}
+
+export function getDataTable(
+  tableName: string,
+  limit = 25,
+  offset = 0,
+  query: DataTableQuery = {},
+) {
+  const params = new URLSearchParams();
+
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+
+  if (query.search) {
+    params.set("search", query.search);
+  }
+
+  if (query.filterColumn) {
+    params.set(
+      "filter_column",
+      query.filterColumn,
+    );
+  }
+
+  if (query.filterValue) {
+    params.set(
+      "filter_value",
+      query.filterValue,
+    );
+  }
+
+  if (query.filterMode) {
+    params.set(
+      "filter_mode",
+      query.filterMode,
+    );
+  }
+
+  if (query.sortBy) {
+    params.set("sort_by", query.sortBy);
+  }
+
+  if (query.sortOrder) {
+    params.set(
+      "sort_order",
+      query.sortOrder,
+    );
+  }
+
+  return apiFetch<DataTableResponse>(
+    `/api/v1/data/tables/${encodeURIComponent(tableName)}?${params.toString()}`,
+  );
+}
+
 export async function login(
   username: string,
   password: string,
@@ -174,6 +260,31 @@ export function getAlert(
 ): Promise<Alert> {
   return apiFetch<Alert>(
     `/api/v1/alerts/${encodeURIComponent(alertId)}`,
+  );
+}
+
+export interface AlertTransaction {
+  transaction_id: string;
+  sender_account_id: string;
+  receiver_account_id: string;
+  transaction_type_code: string;
+  amount: number | string;
+  currency_code: string;
+  transaction_timestamp: string;
+  device_id: string;
+  ip_address: string | null;
+  country_code: string;
+  status: string;
+  description: string | null;
+  created_at: string;
+  known_fraud_label: number;
+}
+
+export async function getAlertTransaction(
+  alertId: string,
+): Promise<AlertTransaction> {
+  return apiFetch<AlertTransaction>(
+    `/api/v1/alerts/${alertId}/transaction`,
   );
 }
 

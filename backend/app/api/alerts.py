@@ -5,8 +5,8 @@ Fraud alert API endpoints.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.api.dependencies import require_roles
 
+from app.api.dependencies import require_roles
 from app.db.database import get_database_connection
 from app.schemas.alerts import (
     AlertListResponse,
@@ -19,11 +19,6 @@ router = APIRouter(
     prefix="/api/v1/alerts",
     tags=["Fraud Alerts"],
 )
-
-
-# ============================================================
-# List alerts
-# ============================================================
 
 
 @router.get(
@@ -44,10 +39,6 @@ def list_alerts(
         le=500,
     ),
 ):
-    """
-    Return the most recent fraud alerts.
-    """
-
     query = """
         SELECT
             alert_id,
@@ -71,29 +62,13 @@ def list_alerts(
     """
 
     try:
-
         with get_database_connection() as connection:
-
             with connection.cursor() as cursor:
-
-                cursor.execute(
-                    query,
-                    (limit,),
-                )
-
+                cursor.execute(query, (limit,))
                 rows = cursor.fetchall()
-
                 columns = [description.name for description in cursor.description]
 
-        alerts = [
-            dict(
-                zip(
-                    columns,
-                    row,
-                )
-            )
-            for row in rows
-        ]
+        alerts = [dict(zip(columns, row)) for row in rows]
 
         return AlertListResponse(
             count=len(alerts),
@@ -101,16 +76,10 @@ def list_alerts(
         )
 
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve fraud alerts.",
         ) from exc
-
-
-# ============================================================
-# Get single alert
-# ============================================================
 
 
 @router.get(
@@ -127,10 +96,6 @@ def get_alert(
         )
     ),
 ):
-    """
-    Return a single fraud alert by alert_id.
-    """
-
     query = """
         SELECT
             alert_id,
@@ -153,20 +118,12 @@ def get_alert(
     """
 
     try:
-
         with get_database_connection() as connection:
-
             with connection.cursor() as cursor:
-
-                cursor.execute(
-                    query,
-                    (alert_id,),
-                )
-
+                cursor.execute(query, (alert_id,))
                 row = cursor.fetchone()
 
                 if row is None:
-
                     raise HTTPException(
                         status_code=404,
                         detail="Fraud alert not found.",
@@ -174,12 +131,7 @@ def get_alert(
 
                 columns = [description.name for description in cursor.description]
 
-        alert = dict(
-            zip(
-                columns,
-                row,
-            )
-        )
+        alert = dict(zip(columns, row))
 
         return AlertResponse(**alert)
 
@@ -187,16 +139,86 @@ def get_alert(
         raise
 
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve fraud alert.",
         ) from exc
 
 
-# ============================================================
-# Update alert
-# ============================================================
+@router.get(
+    "/{alert_id}/transaction",
+)
+def get_alert_transaction(
+    alert_id: str,
+    current_user: dict = Depends(
+        require_roles(
+            "SECURITY_ADMIN",
+            "SECURITY_ANALYST",
+            "AUDITOR",
+        )
+    ),
+):
+    """
+    Return the transaction associated with a fraud alert.
+
+    This endpoint is used by the Alert Detail page to display
+    transaction evidence related to the selected fraud alert.
+    """
+
+    query = """
+        SELECT
+            t.transaction_id,
+            t.sender_account_id,
+            t.receiver_account_id,
+            t.transaction_type_code,
+            t.amount,
+            t.currency_code,
+            t.transaction_timestamp,
+            t.device_id,
+            t.ip_address,
+            t.country_code,
+            t.status,
+            t.description,
+            t.created_at,
+            t.known_fraud_label
+        FROM fraud_alerts a
+        LEFT JOIN transactions t
+            ON t.transaction_id = a.transaction_id
+        WHERE a.alert_id = %s
+    """
+
+    try:
+        with get_database_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, (alert_id,))
+                row = cursor.fetchone()
+
+                if row is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Fraud alert not found.",
+                    )
+
+                columns = [description.name for description in cursor.description]
+
+        transaction = dict(zip(columns, row))
+
+        if transaction["transaction_id"] is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Transaction evidence not found for this alert.",
+            )
+
+        return transaction
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve transaction evidence.",
+        ) from exc
 
 
 @router.patch(
@@ -213,13 +235,6 @@ def update_alert(
         )
     ),
 ):
-    """
-    Update the status of a fraud alert.
-
-    ADMIN and INVESTIGATOR users can update alerts.
-    VIEWER users cannot.
-    """
-
     allowed_statuses = {
         "OPEN",
         "INVESTIGATING",
@@ -266,11 +281,8 @@ def update_alert(
     """
 
     try:
-
         with get_database_connection() as connection:
-
             with connection.cursor() as cursor:
-
                 cursor.execute(
                     query,
                     (
@@ -292,12 +304,7 @@ def update_alert(
 
             connection.commit()
 
-        alert = dict(
-            zip(
-                columns,
-                row,
-            )
-        )
+        alert = dict(zip(columns, row))
 
         create_audit_log(
             user_id=current_user.get("user_id"),
@@ -316,7 +323,7 @@ def update_alert(
         raise
 
     except Exception as exc:
-
         raise HTTPException(
-            status_code=500, detail="Failed to update fraud alert."
+            status_code=500,
+            detail="Failed to update fraud alert.",
         ) from exc
