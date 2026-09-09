@@ -17,7 +17,9 @@ import {
 
 import {
   getAlert,
+  getAlertTransaction,
   type Alert,
+  type AlertTransaction,
 } from "../api/client";
 
 export default function AlertDetail() {
@@ -29,6 +31,9 @@ export default function AlertDetail() {
 
   const [alert, setAlert] =
     useState<Alert | null>(null);
+
+  const [transaction, setTransaction] =
+    useState<AlertTransaction | null>(null);
 
   const [loading, setLoading] =
     useState(true);
@@ -48,10 +53,34 @@ export default function AlertDetail() {
         setLoading(true);
         setError(null);
 
-        const response =
+        /*
+         * Load the fraud alert first.
+         */
+        const alertResponse =
           await getAlert(alertId);
 
-        setAlert(response);
+        setAlert(alertResponse);
+
+        /*
+         * Load the transaction associated
+         * with this fraud alert.
+         *
+         * Transaction failure should not prevent
+         * the main alert from being displayed.
+         */
+        try {
+          const transactionResponse =
+            await getAlertTransaction(alertId);
+
+          setTransaction(transactionResponse);
+        } catch (transactionError) {
+          console.error(
+            "Unable to load alert transaction:",
+            transactionError,
+          );
+
+          setTransaction(null);
+        }
       } catch (err) {
         console.error(err);
 
@@ -68,6 +97,9 @@ export default function AlertDetail() {
     loadAlert(alertId);
   }, [alertId]);
 
+  /*
+   * Loading state
+   */
   if (loading) {
     return (
       <div className="empty-state">
@@ -76,6 +108,9 @@ export default function AlertDetail() {
     );
   }
 
+  /*
+   * Error state
+   */
   if (error || !alert) {
     return (
       <div>
@@ -119,6 +154,10 @@ export default function AlertDetail() {
 
   return (
     <div>
+      {/* ================================================== */}
+      {/* PAGE HEADER */}
+      {/* ================================================== */}
+
       <div className="page-header">
         <div>
           <button
@@ -145,6 +184,10 @@ export default function AlertDetail() {
           </p>
         </div>
       </div>
+
+      {/* ================================================== */}
+      {/* ALERT SUMMARY */}
+      {/* ================================================== */}
 
       <div className="stats-grid">
         <div className="stat-card">
@@ -238,6 +281,10 @@ export default function AlertDetail() {
         </div>
       </div>
 
+      {/* ================================================== */}
+      {/* DETECTION + REASON */}
+      {/* ================================================== */}
+
       <div className="dashboard-grid">
         <section className="panel">
           <div className="panel-header">
@@ -253,6 +300,7 @@ export default function AlertDetail() {
           <div className="control-list">
             <div className="control-row">
               <span>Alert Type</span>
+
               <strong>
                 {alert.alert_type}
               </strong>
@@ -260,20 +308,23 @@ export default function AlertDetail() {
 
             <div className="control-row">
               <span>Transaction ID</span>
-              <strong>
+
+              <strong className="mono-value">
                 {alert.transaction_id}
               </strong>
             </div>
 
             <div className="control-row">
               <span>Customer ID</span>
-              <strong>
+
+              <strong className="mono-value">
                 {alert.customer_id}
               </strong>
             </div>
 
             <div className="control-row">
               <span>Risk Level</span>
+
               <strong>
                 {alert.risk_level}
               </strong>
@@ -281,6 +332,7 @@ export default function AlertDetail() {
 
             <div className="control-row">
               <span>Model</span>
+
               <strong>
                 {alert.model_name}
               </strong>
@@ -288,6 +340,7 @@ export default function AlertDetail() {
 
             <div className="control-row">
               <span>Model Version</span>
+
               <strong>
                 {alert.model_version}
               </strong>
@@ -320,6 +373,170 @@ export default function AlertDetail() {
         </section>
       </div>
 
+      {/* ================================================== */}
+      {/* TRANSACTION EVIDENCE */}
+      {/* ================================================== */}
+
+      {transaction && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Transaction Evidence</h2>
+
+              <p>
+                Transaction associated with this
+                fraud alert
+              </p>
+            </div>
+
+            <div className="panel-status">
+              TRANSACTION
+            </div>
+          </div>
+
+          <div className="control-list">
+            <div className="control-row">
+              <span>Transaction ID</span>
+
+              <strong className="mono-value">
+                {transaction.transaction_id}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Amount</span>
+
+              <strong>
+                {Number(
+                  transaction.amount,
+                ).toLocaleString(
+                  undefined,
+                  {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  },
+                )}{" "}
+                {transaction.currency_code}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Transaction Type</span>
+
+              <strong>
+                {transaction.transaction_type_code}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Status</span>
+
+              <strong>
+                {transaction.status}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Transaction Timestamp</span>
+
+              <strong>
+                {new Date(
+                  transaction.transaction_timestamp,
+                ).toLocaleString()}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Sender Account</span>
+
+              <strong className="mono-value">
+                {transaction.sender_account_id}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Receiver Account</span>
+
+              <strong className="mono-value">
+                {transaction.receiver_account_id}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Device</span>
+
+              <strong className="mono-value">
+                {transaction.device_id}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>IP Address</span>
+
+              <strong className="mono-value">
+                {transaction.ip_address ??
+                  "Not available"}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Country</span>
+
+              <strong>
+                {transaction.country_code}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Description</span>
+
+              <strong>
+                {transaction.description ??
+                  "No description"}
+              </strong>
+            </div>
+
+            <div className="control-row">
+              <span>Known Fraud Label</span>
+
+              <strong>
+                {transaction.known_fraud_label === 1
+                  ? "FRAUD"
+                  : "NOT LABELED AS FRAUD"}
+              </strong>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ================================================== */}
+      {/* TRANSACTION NOT AVAILABLE */}
+      {/* ================================================== */}
+
+      {!transaction && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Transaction Evidence</h2>
+
+              <p>
+                Transaction associated with this
+                fraud alert
+              </p>
+            </div>
+          </div>
+
+          <div className="empty-state">
+            Transaction evidence is not available
+            for this alert.
+          </div>
+        </section>
+      )}
+
+      {/* ================================================== */}
+      {/* MODEL FEATURES */}
+      {/* ================================================== */}
+
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -351,6 +568,10 @@ export default function AlertDetail() {
           )}
         </pre>
       </section>
+
+      {/* ================================================== */}
+      {/* REVIEW INFORMATION */}
+      {/* ================================================== */}
 
       <section className="panel">
         <div className="panel-header">
